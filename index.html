@@ -11,8 +11,8 @@
       <header>
         <h1>Contour Swarm Particle System</h1>
         <p>
-          Allow webcam access and the swarm will lock onto the strongest contours
-          in your camera feed.
+          Allow webcam access and the swarm will lock onto your segmented human
+          contour (MediaPipe).
         </p>
       </header>
 
@@ -25,9 +25,18 @@
         <span id="status">Idle</span>
       </section>
 
-      <canvas id="scene" width="960" height="540"></canvas>
+      <section class="debug-panel">
+        <figure>
+          <figcaption>Webcam seen by app</figcaption>
+          <video id="camera" autoplay playsinline muted></video>
+        </figure>
+        <figure>
+          <figcaption>MediaPipe segmentation mask</figcaption>
+          <canvas id="maskView" width="320" height="180"></canvas>
+        </figure>
+      </section>
 
-      <video id="camera" autoplay playsinline muted></video>
+      <canvas id="scene" width="960" height="540"></canvas>
       <canvas id="analysis" width="320" height="180"></canvas>
     </main>
 

@@ -67,7 +67,41 @@ label {
 }
 
 #status {
-  opacity: 0.9;
+  opacity: 0.95;
+}
+
+.debug-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 0.8rem;
+}
+
+.debug-panel figure {
+  margin: 0;
+  background: #0b1431;
+  border: 1px solid #33456f;
+  border-radius: 0.7rem;
+  padding: 0.45rem;
+}
+
+.debug-panel figcaption {
+  font-size: 0.85rem;
+  opacity: 0.85;
+  margin-bottom: 0.4rem;
+}
+
+#camera,
+#maskView {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 0.45rem;
+  background: #050b1c;
+  display: block;
+}
+
+#camera {
+  transform: scaleX(-1);
 }
 
 #scene {
@@ -78,7 +112,6 @@ label {
   box-shadow: 0 25px 60px rgba(0, 0, 0, 0.45);
 }
 
-#camera,
 #analysis {
   display: none;
 }

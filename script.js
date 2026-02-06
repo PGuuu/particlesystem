@@ -3,6 +3,8 @@ const ctx = canvas.getContext('2d');
 const video = document.getElementById('camera');
 const analysisCanvas = document.getElementById('analysis');
 const analysisCtx = analysisCanvas.getContext('2d', { willReadFrequently: true });
+const maskViewCanvas = document.getElementById('maskView');
+const maskViewCtx = maskViewCanvas.getContext('2d');
 const toggleBtn = document.getElementById('toggleCamera');
 const statusLabel = document.getElementById('status');
 const particleCountInput = document.getElementById('particleCount');
@@ -22,7 +24,8 @@ const state = {
   segmentationBusy: false,
   latestMaskData: null,
   detectedHuman: false,
-  humanCoverage: 0
+  humanCoverage: 0,
+  hasSegmentationResult: false
 };
 
 class Particle {
@@ -111,6 +114,33 @@ function setParticleCount(nextCount) {
   }
 }
 
+function drawMaskDebug() {
+  const w = maskViewCanvas.width;
+  const h = maskViewCanvas.height;
+  maskViewCtx.clearRect(0, 0, w, h);
+
+  if (!state.latestMaskData) {
+    maskViewCtx.fillStyle = '#0a1228';
+    maskViewCtx.fillRect(0, 0, w, h);
+    maskViewCtx.fillStyle = '#8ea2d5';
+    maskViewCtx.font = '13px sans-serif';
+    maskViewCtx.fillText('No segmentation yet', 12, 22);
+    return;
+  }
+
+  maskViewCtx.putImageData(state.latestMaskData, 0, 0);
+  maskViewCtx.strokeStyle = 'rgba(255,255,255,0.85)';
+  for (let i = 0; i < state.targetPoints.length; i += 8) {
+    const p = state.targetPoints[i];
+    if (!p) continue;
+    const x = (p.x / (canvas.width / (window.devicePixelRatio || 1))) * w;
+    const y = (p.y / (canvas.height / (window.devicePixelRatio || 1))) * h;
+    maskViewCtx.beginPath();
+    maskViewCtx.arc(x, y, 1, 0, Math.PI * 2);
+    maskViewCtx.stroke();
+  }
+}
+
 async function initSegmentation() {
   if (state.segmentationReady || !window.SelfieSegmentation) {
     return;
@@ -120,9 +150,7 @@ async function initSegmentation() {
     locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`
   });
 
-  model.setOptions({
-    modelSelection: 1
-  });
+  model.setOptions({ modelSelection: 1 });
 
   model.onResults((results) => {
     const aw = analysisCanvas.width;
@@ -132,6 +160,7 @@ async function initSegmentation() {
       state.latestMaskData = null;
       state.detectedHuman = false;
       state.humanCoverage = 0;
+      state.hasSegmentationResult = false;
       return;
     }
 
@@ -139,18 +168,19 @@ async function initSegmentation() {
     analysisCtx.drawImage(results.segmentationMask, 0, 0, aw, ah);
     const imageData = analysisCtx.getImageData(0, 0, aw, ah);
     state.latestMaskData = imageData;
+    state.hasSegmentationResult = true;
 
     let humanPixels = 0;
     const data = imageData.data;
     for (let i = 0; i < data.length; i += 4) {
-      if (data[i] > 120) {
+      if (data[i] > 80) {
         humanPixels += 1;
       }
     }
 
     const totalPixels = aw * ah;
     state.humanCoverage = humanPixels / totalPixels;
-    state.detectedHuman = state.humanCoverage > 0.02;
+    state.detectedHuman = state.humanCoverage > 0.01;
   });
 
   state.selfieSegmentation = model;
@@ -158,11 +188,7 @@ async function initSegmentation() {
 }
 
 async function updateSegmentation() {
-  if (!state.cameraEnabled || video.readyState < 2 || !state.segmentationReady) {
-    return;
-  }
-
-  if (state.segmentationBusy) {
+  if (!state.cameraEnabled || video.readyState < 2 || !state.segmentationReady || state.segmentationBusy) {
     return;
   }
 
@@ -185,7 +211,6 @@ function extractContourPoints() {
   const aw = analysisCanvas.width;
   const ah = analysisCanvas.height;
   const frame = state.latestMaskData.data;
-
   const points = [];
   const step = 2;
   const dpr = window.devicePixelRatio || 1;
@@ -201,27 +226,16 @@ function extractContourPoints() {
       const down = idx + aw * 4;
 
       const m = frame[idx];
-      const mL = frame[left];
-      const mR = frame[right];
-      const mU = frame[up];
-      const mD = frame[down];
+      const gradient = Math.abs(frame[left] - frame[right]) + Math.abs(frame[up] - frame[down]);
+      const boundary = m > 20 && m < 235;
 
-      const gradient = Math.abs(mL - mR) + Math.abs(mU - mD);
-      const onBoundary = m > 40 && m < 220;
-
-      if ((gradient > 120 || onBoundary) && Math.random() < 0.45) {
-        points.push({
-          x: (x / aw) * width,
-          y: (y / ah) * height
-        });
+      if ((gradient > 80 || boundary) && Math.random() < 0.38) {
+        points.push({ x: (x / aw) * width, y: (y / ah) * height });
       }
     }
   }
 
-  if (points.length > 1200) {
-    points.length = 1200;
-  }
-
+  if (points.length > 1400) points.length = 1400;
   state.targetPoints = points;
 }
 
@@ -230,17 +244,14 @@ function drawConnections(points, width, height) {
   ctx.save();
   ctx.strokeStyle = 'rgba(132, 208, 255, 0.10)';
   ctx.lineWidth = 1;
-
   const sampleSize = clamp(Math.floor(points.length * 0.08), 25, 120);
+
   for (let i = 0; i < sampleSize; i += 1) {
     const a = points[(Math.random() * points.length) | 0];
     const b = points[(Math.random() * points.length) | 0];
-
     if (!a || !b) continue;
-    const dx = a.x - b.x;
-    const dy = a.y - b.y;
-    const dist = Math.hypot(dx, dy);
 
+    const dist = Math.hypot(a.x - b.x, a.y - b.y);
     if (dist < Math.min(width, height) * 0.25) {
       ctx.globalAlpha = 1 - dist / (Math.min(width, height) * 0.25);
       ctx.beginPath();
@@ -249,6 +260,7 @@ function drawConnections(points, width, height) {
       ctx.stroke();
     }
   }
+
   ctx.restore();
 }
 
@@ -260,15 +272,14 @@ function render(ts) {
   const height = canvas.height / dpr;
 
   state.frameCounter += 1;
-
   if (state.frameCounter % state.contourUpdateEvery === 0) {
-    updateSegmentation();
+    void updateSegmentation();
     extractContourPoints();
+    drawMaskDebug();
   }
 
   ctx.fillStyle = 'rgba(5, 11, 28, 0.2)';
   ctx.fillRect(0, 0, width, height);
-
   drawConnections(state.targetPoints, width, height);
 
   const hasTarget = state.targetPoints.length > 0;
@@ -280,12 +291,14 @@ function render(ts) {
   if (!state.cameraEnabled) {
     statusLabel.textContent = 'Idle (no webcam)';
   } else if (!state.segmentationReady) {
-    statusLabel.textContent = 'Loading human-segmentation model...';
+    statusLabel.textContent = 'Loading MediaPipe model...';
+  } else if (!state.hasSegmentationResult) {
+    statusLabel.textContent = 'Waiting for segmentation result...';
   } else if (state.detectedHuman) {
     const pct = Math.round(state.humanCoverage * 100);
-    statusLabel.textContent = `Human detected (${pct}% mask), tracking contour (${state.targetPoints.length} points)`;
+    statusLabel.textContent = `已偵測到人像 Human detected (${pct}%)，tracking ${state.targetPoints.length} pts`;
   } else {
-    statusLabel.textContent = 'No clear person detected yet - step into frame';
+    statusLabel.textContent = '尚未穩定偵測人像，請站進畫面並提高光線';
   }
 }
 
@@ -297,18 +310,13 @@ async function startCamera() {
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: {
-        width: { ideal: 640 },
-        height: { ideal: 360 },
-        facingMode: 'user'
-      },
+      video: { width: { ideal: 640 }, height: { ideal: 360 }, facingMode: 'user' },
       audio: false
     });
 
     state.stream = stream;
     video.srcObject = stream;
     await video.play();
-
     await initSegmentation();
 
     state.cameraEnabled = true;
@@ -320,9 +328,8 @@ async function startCamera() {
 }
 
 function stopCamera() {
-  if (state.stream) {
-    state.stream.getTracks().forEach((t) => t.stop());
-  }
+  if (state.stream) state.stream.getTracks().forEach((t) => t.stop());
+
   state.stream = null;
   video.srcObject = null;
   state.cameraEnabled = false;
@@ -330,6 +337,9 @@ function stopCamera() {
   state.latestMaskData = null;
   state.detectedHuman = false;
   state.humanCoverage = 0;
+  state.hasSegmentationResult = false;
+
+  maskViewCtx.clearRect(0, 0, maskViewCanvas.width, maskViewCanvas.height);
   toggleBtn.textContent = 'Start webcam';
 }
 
