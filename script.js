@@ -16,7 +16,13 @@ const state = {
   stream: null,
   cameraEnabled: false,
   frameCounter: 0,
-  contourUpdateEvery: 2
+  contourUpdateEvery: 2,
+  selfieSegmentation: null,
+  segmentationReady: false,
+  segmentationBusy: false,
+  latestMaskData: null,
+  detectedHuman: false,
+  humanCoverage: 0
 };
 
 class Particle {
@@ -52,7 +58,6 @@ class Particle {
 
     this.vx += rand(-0.06, 0.06);
     this.vy += rand(-0.06, 0.06);
-
     this.vx *= 0.9;
     this.vy *= 0.9;
 
@@ -106,16 +111,80 @@ function setParticleCount(nextCount) {
   }
 }
 
+async function initSegmentation() {
+  if (state.segmentationReady || !window.SelfieSegmentation) {
+    return;
+  }
+
+  const model = new window.SelfieSegmentation({
+    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`
+  });
+
+  model.setOptions({
+    modelSelection: 1
+  });
+
+  model.onResults((results) => {
+    const aw = analysisCanvas.width;
+    const ah = analysisCanvas.height;
+
+    if (!results.segmentationMask) {
+      state.latestMaskData = null;
+      state.detectedHuman = false;
+      state.humanCoverage = 0;
+      return;
+    }
+
+    analysisCtx.clearRect(0, 0, aw, ah);
+    analysisCtx.drawImage(results.segmentationMask, 0, 0, aw, ah);
+    const imageData = analysisCtx.getImageData(0, 0, aw, ah);
+    state.latestMaskData = imageData;
+
+    let humanPixels = 0;
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i] > 120) {
+        humanPixels += 1;
+      }
+    }
+
+    const totalPixels = aw * ah;
+    state.humanCoverage = humanPixels / totalPixels;
+    state.detectedHuman = state.humanCoverage > 0.02;
+  });
+
+  state.selfieSegmentation = model;
+  state.segmentationReady = true;
+}
+
+async function updateSegmentation() {
+  if (!state.cameraEnabled || video.readyState < 2 || !state.segmentationReady) {
+    return;
+  }
+
+  if (state.segmentationBusy) {
+    return;
+  }
+
+  state.segmentationBusy = true;
+  try {
+    await state.selfieSegmentation.send({ image: video });
+  } catch (err) {
+    console.error('Segmentation failed:', err);
+  } finally {
+    state.segmentationBusy = false;
+  }
+}
+
 function extractContourPoints() {
-  if (!state.cameraEnabled || video.readyState < 2) {
+  if (!state.latestMaskData) {
     state.targetPoints = [];
     return;
   }
 
   const aw = analysisCanvas.width;
   const ah = analysisCanvas.height;
-  analysisCtx.drawImage(video, 0, 0, aw, ah);
-  const frame = analysisCtx.getImageData(0, 0, aw, ah).data;
+  const frame = state.latestMaskData.data;
 
   const points = [];
   const step = 2;
@@ -131,18 +200,16 @@ function extractContourPoints() {
       const up = idx - aw * 4;
       const down = idx + aw * 4;
 
-      const lum = frame[idx] * 0.299 + frame[idx + 1] * 0.587 + frame[idx + 2] * 0.114;
-      const lumL = frame[left] * 0.299 + frame[left + 1] * 0.587 + frame[left + 2] * 0.114;
-      const lumR = frame[right] * 0.299 + frame[right + 1] * 0.587 + frame[right + 2] * 0.114;
-      const lumU = frame[up] * 0.299 + frame[up + 1] * 0.587 + frame[up + 2] * 0.114;
-      const lumD = frame[down] * 0.299 + frame[down + 1] * 0.587 + frame[down + 2] * 0.114;
+      const m = frame[idx];
+      const mL = frame[left];
+      const mR = frame[right];
+      const mU = frame[up];
+      const mD = frame[down];
 
-      const edgeStrength =
-        Math.abs(lumL - lumR) +
-        Math.abs(lumU - lumD) +
-        Math.abs(lum - ((lumL + lumR + lumU + lumD) * 0.25));
+      const gradient = Math.abs(mL - mR) + Math.abs(mU - mD);
+      const onBoundary = m > 40 && m < 220;
 
-      if (edgeStrength > 80 && Math.random() < 0.32) {
+      if ((gradient > 120 || onBoundary) && Math.random() < 0.45) {
         points.push({
           x: (x / aw) * width,
           y: (y / ah) * height
@@ -151,8 +218,8 @@ function extractContourPoints() {
     }
   }
 
-  if (points.length > 1000) {
-    points.length = 1000;
+  if (points.length > 1200) {
+    points.length = 1200;
   }
 
   state.targetPoints = points;
@@ -193,7 +260,9 @@ function render(ts) {
   const height = canvas.height / dpr;
 
   state.frameCounter += 1;
+
   if (state.frameCounter % state.contourUpdateEvery === 0) {
+    updateSegmentation();
     extractContourPoints();
   }
 
@@ -208,9 +277,16 @@ function render(ts) {
     p.draw(ctx, hasTarget);
   }
 
-  statusLabel.textContent = state.cameraEnabled
-    ? `Tracking contours (${state.targetPoints.length} points)`
-    : 'Idle (no webcam)';
+  if (!state.cameraEnabled) {
+    statusLabel.textContent = 'Idle (no webcam)';
+  } else if (!state.segmentationReady) {
+    statusLabel.textContent = 'Loading human-segmentation model...';
+  } else if (state.detectedHuman) {
+    const pct = Math.round(state.humanCoverage * 100);
+    statusLabel.textContent = `Human detected (${pct}% mask), tracking contour (${state.targetPoints.length} points)`;
+  } else {
+    statusLabel.textContent = 'No clear person detected yet - step into frame';
+  }
 }
 
 async function startCamera() {
@@ -231,6 +307,10 @@ async function startCamera() {
 
     state.stream = stream;
     video.srcObject = stream;
+    await video.play();
+
+    await initSegmentation();
+
     state.cameraEnabled = true;
     toggleBtn.textContent = 'Stop webcam';
   } catch (err) {
@@ -247,6 +327,9 @@ function stopCamera() {
   video.srcObject = null;
   state.cameraEnabled = false;
   state.targetPoints = [];
+  state.latestMaskData = null;
+  state.detectedHuman = false;
+  state.humanCoverage = 0;
   toggleBtn.textContent = 'Start webcam';
 }
 
