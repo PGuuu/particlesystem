@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Contour Swarm Particle System</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <header>
+        <h1>Contour Swarm Particle System</h1>
+        <p>
+          Allow webcam access and the swarm will lock onto your segmented human
+          contour (MediaPipe).
+        </p>
+      </header>
+
+      <section class="controls">
+        <button id="toggleCamera">Start webcam</button>
+        <label>
+          Particle count
+          <input id="particleCount" type="range" min="150" max="1200" value="600" step="10" />
+        </label>
+        <span id="status">Idle</span>
+      </section>
+
+      <section class="debug-panel">
+        <figure>
+          <figcaption>Webcam seen by app</figcaption>
+          <video id="camera" autoplay playsinline muted></video>
+        </figure>
+        <figure>
+          <figcaption>MediaPipe segmentation mask</figcaption>
+          <canvas id="maskView" width="320" height="180"></canvas>
+        </figure>
+      </section>
+
+      <canvas id="scene" width="960" height="540"></canvas>
+      <canvas id="analysis" width="320" height="180"></canvas>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js"></script>
+    <script src="script.js" type="module"></script>
+  </body>
+</html>
