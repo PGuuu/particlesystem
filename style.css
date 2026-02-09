@@ -1,0 +1,44 @@
+:root {
+  font-family: "Segoe UI", "Noto Sans TC", sans-serif;
+  color: #f2f4f8;
+  background: radial-gradient(circle at top, #1d2b3a, #0b1118 60%);
+}
+
+body {
+  margin: 0;
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  gap: 12px;
+}
+
+.ui {
+  text-align: center;
+}
+
+h1 {
+  margin: 12px 0 4px;
+  font-size: 1.6rem;
+}
+
+canvas {
+  border: 2px solid #2b3b4f;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #8ecae6 0%, #84a98c 40%, #52796f 100%);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+}
+
+.hud {
+  width: 960px;
+  max-width: 92vw;
+  min-height: 56px;
+}
+
+.message {
+  background: rgba(16, 20, 26, 0.8);
+  border: 1px solid rgba(148, 187, 233, 0.5);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 0.95rem;
+  min-height: 24px;
+}
